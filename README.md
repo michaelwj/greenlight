@@ -10,6 +10,10 @@ Built for households that block YouTube at the network or device level but
 still want the *good parts* — piano tutorials, science explainers, maker
 videos — to get through.
 
+| Parent app | Kid portal |
+|:---:|:---:|
+| ![Parent review queue](docs/images/parent-app.png) | ![Kid request portal](docs/images/kid-portal.png) |
+
 ## How it works
 
 ```
