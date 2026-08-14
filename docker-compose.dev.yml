@@ -1,0 +1,66 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: greenlight
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - ./backend/.env.example
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "${API_PORT:-8001}:8000"
+    command: sh -c "until alembic upgrade head; do echo 'migration failed (db booting?), retrying in 3s'; sleep 3; done && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/tests:/app/tests
+      - ./kid-web:/app/web/kid
+      - ./parent-web:/app/web/parent
+      - ./media/greenlight:/media/greenlight
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - ./backend/.env.example
+    depends_on:
+      - redis
+      - db
+    command: python -m app.workers.worker
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/tests:/app/tests
+      - ./media/greenlight:/media/greenlight
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - ./backend/.env.example
+    depends_on:
+      - redis
+      - db
+    command: python -m app.workers.scheduler
+    volumes:
+      - ./backend/app:/app/app
+
+volumes:
+  postgres_data:

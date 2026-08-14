@@ -1,0 +1,6 @@
+# Dev/test extras — mirrors [project.optional-dependencies].dev in pyproject.toml.
+-r requirements.txt
+aiosqlite>=0.20.0
+pytest>=8.3.4
+pytest-asyncio>=0.24.0
+ruff>=0.9.2

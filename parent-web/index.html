@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#070b16" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Greenlight — Parent</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <h1>Greenlight</h1>
+        <p id="heroSub">Parent console</p>
+      </header>
+
+      <section id="loginPanel" class="panel hidden">
+        <h2>Sign in</h2>
+        <label>
+          Parent token
+          <input id="tokenInput" type="password" placeholder="Paste your bearer token" />
+        </label>
+        <button id="loginBtn">Sign in</button>
+        <p class="hint">Tokens are created with <code>admin_cli.py create-parent</code>.</p>
+      </section>
+
+      <div id="appPanels" class="hidden">
+        <nav class="tabs">
+          <button data-tab="review" class="tab active"><span class="icon">🛎️</span>Review</button>
+          <button data-tab="history" class="tab"><span class="icon">🕘</span>History</button>
+          <button data-tab="kids" class="tab"><span class="icon">🧒</span>Kids</button>
+          <button data-tab="channels" class="tab"><span class="icon">📺</span>Channels</button>
+          <button data-tab="digest" class="tab"><span class="icon">📊</span>Digest</button>
+          <button data-tab="settings" class="tab"><span class="icon">⚙️</span>Settings</button>
+        </nav>
+
+        <section id="tab-review" class="tabpane"></section>
+        <section id="tab-history" class="tabpane hidden"></section>
+        <section id="tab-kids" class="tabpane hidden"></section>
+        <section id="tab-channels" class="tabpane hidden"></section>
+        <section id="tab-digest" class="tabpane hidden"></section>
+        <section id="tab-settings" class="tabpane hidden">
+          <div class="panel">
+            <h2>Notifications</h2>
+            <p id="pushStatus" class="hint">Push status unknown.</p>
+            <button id="enablePushBtn">Enable push notifications</button>
+          </div>
+          <div class="panel">
+            <h2>Session</h2>
+            <button id="logoutBtn" class="danger">Sign out</button>
+          </div>
+        </section>
+      </div>
+
+      <div id="toast" class="toast hidden"></div>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
