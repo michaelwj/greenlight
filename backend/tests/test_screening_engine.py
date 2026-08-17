@@ -406,3 +406,80 @@ async def test_per_kid_limit_overrides_global(db_session, monkeypatch) -> None:
     child.daily_request_limit = None  # falls back to global (10) -> passes
     await db_session.commit()
     await enforce_daily_request_limit(db_session, child.id)
+
+async def test_second_kid_shares_available_video(db_session) -> None:
+    """A video a sibling already has: own request, own row, no re-download."""
+    from app.services.sharing import can_share, clone_request_for_child
+
+    kid_a = await make_child(db_session)
+    kid_b = Child(display_name="Kid B")
+    db_session.add(kid_b)
+    await db_session.commit()
+    await db_session.refresh(kid_b)
+
+    source = make_request(kid_a.id)
+    source.status = YoutubeStatus.AVAILABLE.value
+    source.title = "Fractions lesson"
+    source.video_id = "abc"
+    source.classified_category = "education"
+    source.allowance_bucket = "educational"
+    source.local_file_path = "/media/x/Fractions_lesson.mp4"
+    db_session.add(source)
+    await db_session.commit()
+
+    assert can_share(source)
+    shared = await clone_request_for_child(db_session, source, kid_b.id)
+
+    assert shared.id != source.id
+    assert shared.requested_by_child_id == kid_b.id
+    assert shared.status == YoutubeStatus.APPROVED.value  # dispatch queues the download
+    assert shared.video_id == source.video_id
+    assert shared.title == source.title
+    assert shared.minutes_charged == 0  # educational is free
+
+
+async def test_shared_entertainment_charges_second_kid_budget(db_session) -> None:
+    from app.services.sharing import clone_request_for_child
+
+    kid_a = await make_child(db_session)
+    kid_b = Child(display_name="Kid B")
+    db_session.add(kid_b)
+    await db_session.commit()
+    await db_session.refresh(kid_b)
+
+    source = make_request(kid_a.id)
+    source.status = YoutubeStatus.AVAILABLE.value
+    source.allowance_bucket = "entertainment"
+    source.duration_seconds = 600
+    db_session.add(source)
+    await db_session.commit()
+
+    shared = await clone_request_for_child(db_session, source, kid_b.id)
+    assert shared.status == YoutubeStatus.APPROVED.value
+    assert shared.minutes_charged == 10
+
+    # Budget exhausted for the second kid -> denied, sibling's copy untouched.
+    await BudgetService(db_session).set_weekly_minutes(kid_b.id, 5, "entertainment")
+    denied = await clone_request_for_child(db_session, source, kid_b.id)
+    assert denied.status == YoutubeStatus.REJECTED.value
+    assert "fun-video minutes" in denied.denial_reason
+
+
+async def test_shared_unreviewed_video_still_needs_its_own_decision(db_session) -> None:
+    from app.services.sharing import clone_request_for_child
+
+    kid_a = await make_child(db_session)
+    kid_b = Child(display_name="Kid B")
+    db_session.add(kid_b)
+    await db_session.commit()
+    await db_session.refresh(kid_b)
+
+    source = make_request(kid_a.id)
+    source.status = YoutubeStatus.NEEDS_REVIEW.value
+    source.review_reasons = ["Entertainment videos always need a parent decision"]
+    db_session.add(source)
+    await db_session.commit()
+
+    shared = await clone_request_for_child(db_session, source, kid_b.id)
+    assert shared.status == YoutubeStatus.NEEDS_REVIEW.value
+    assert any("another kid" in r for r in shared.review_reasons)

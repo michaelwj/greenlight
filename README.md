@@ -49,6 +49,11 @@ Kid pastes a YouTube link ──► Screening pipeline ──► one of three ou
   h264+AAC selection, polite rate limiting with progressive retry, embedded
   metadata, per-kid Plex labels (use them for Plex smart collections or
   sharing restrictions).
+- **Siblings share cleanly** — when a second kid asks for a video the family
+  already has, it isn't downloaded twice: they get their own request in their
+  own history, the file is shared, and the Plex item picks up their label too
+  so it appears in their library. Their own budget and parent review still
+  apply.
 
 ## Quick start
 

@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 from redis import Redis
 from rq import get_current_job
+from sqlalchemy import select
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
@@ -21,7 +22,7 @@ from app.services.notifications import NotificationService
 
 logger = logging.getLogger(__name__)
 
-_YOUTUBE_LAST_HIT_KEY = "fa:youtube:last_hit"
+_YOUTUBE_LAST_HIT_KEY = "greenlight:youtube:last_hit"
 
 # Failures where a retry cannot help — mark failed immediately, never retry.
 _PERMANENT_FAILURE_MARKERS = (
@@ -61,8 +62,40 @@ def _respect_youtube_gap() -> None:
         redis_conn.close()
 
 
-def run_download_job(request_id: str, notify: bool = True) -> None:
-    asyncio.run(_run_download_job_async(request_id, notify=notify))
+def run_download_job(request_id: str, notify: bool = True, force: bool = False) -> None:
+    asyncio.run(_run_download_job_async(request_id, notify=notify, force=force))
+
+
+async def _adopt_sibling_download(session: Any, request: YoutubeRequest) -> bool:
+    """Reuse a file another kid already downloaded for the same video.
+
+    Returns True when the file was adopted, so the caller can skip yt-dlp
+    entirely and go straight to labeling it for this kid.
+    """
+    if not request.video_id:
+        return False
+
+    result = await session.execute(
+        select(YoutubeRequest).where(
+            YoutubeRequest.video_id == request.video_id,
+            YoutubeRequest.id != request.id,
+            YoutubeRequest.status == YoutubeStatus.AVAILABLE.value,
+            YoutubeRequest.local_file_path.is_not(None),
+        )
+    )
+    for sibling in result.scalars().all():
+        if sibling.local_file_path and Path(sibling.local_file_path).exists():
+            request.local_file_path = sibling.local_file_path
+            request.plex_library_path = sibling.plex_library_path or sibling.local_file_path
+            request.plex_item_id = sibling.plex_item_id
+            request.status = YoutubeStatus.AVAILABLE.value
+            await session.commit()
+            logger.info(
+                "request %s shares the existing download at %s",
+                request.id, sibling.local_file_path,
+            )
+            return True
+    return False
 
 
 def _safe_file_stem(value: str) -> str:
@@ -70,7 +103,9 @@ def _safe_file_stem(value: str) -> str:
     return stem[:120] or "video"
 
 
-async def _run_download_job_async(request_id: str, notify: bool = True) -> None:
+async def _run_download_job_async(
+    request_id: str, notify: bool = True, force: bool = False
+) -> None:
     settings = get_settings()
     media_root = Path(settings.plex_media_root)
     media_root.mkdir(parents=True, exist_ok=True)
@@ -80,6 +115,14 @@ async def _run_download_job_async(request_id: str, notify: bool = True) -> None:
         if not request:
             return
         if request.status == YoutubeStatus.REMOVED.value:
+            return
+
+        # Another kid may already have this exact video on disk — share it
+        # rather than downloading a second copy.
+        if not force and await _adopt_sibling_download(session, request):
+            await _apply_plex_label(settings, request, session)
+            if notify:
+                await NotificationService(session).send_download_available_notification(request)
             return
 
         request.status = YoutubeStatus.DOWNLOADING.value
@@ -282,19 +325,39 @@ async def _apply_plex_label(settings: Any, request: YoutubeRequest, session: Any
                 logger.warning("plex item for %s not found; label not applied", filename)
                 return
 
-            await client.put(
-                f"{base}/library/sections/{section}/all",
-                params={
-                    "type": 1,
-                    "id": rating_key,
-                    "label[0].tag.tag": label,
-                    "label.locked": 1,
-                    "X-Plex-Token": settings.plex_token,
-                },
+            # Labels are additive: a video two kids asked for carries both
+            # names, so a Plex account restricted to either label can see it.
+            # A bare PUT replaces the whole set, so send existing labels too.
+            existing_labels: list[str] = []
+            meta = await client.get(
+                f"{base}/library/metadata/{rating_key}",
+                params={"X-Plex-Token": settings.plex_token},
             )
+            if meta.status_code == 200:
+                entries = ((meta.json().get("MediaContainer") or {}).get("Metadata") or [{}])[0]
+                existing_labels = [
+                    tag for tag in (entry.get("tag") for entry in entries.get("Label") or []) if tag
+                ]
+
+            if any(tag.lower() == label.lower() for tag in existing_labels):
+                request.plex_item_id = str(rating_key)
+                await session.commit()
+                return
+
+            labels = existing_labels + [label]
+            params = {
+                "type": 1,
+                "id": rating_key,
+                "label.locked": 1,
+                "X-Plex-Token": settings.plex_token,
+            }
+            for index, tag in enumerate(labels):
+                params[f"label[{index}].tag.tag"] = tag
+
+            await client.put(f"{base}/library/sections/{section}/all", params=params)
             request.plex_item_id = str(rating_key)
             await session.commit()
-            logger.info("labeled plex item %s with '%s'", rating_key, label)
+            logger.info("labeled plex item %s with %s", rating_key, labels)
     except Exception as err:  # noqa: BLE001
         logger.warning("plex labeling failed for %s: %s", filename, err)
 

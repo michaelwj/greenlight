@@ -22,6 +22,7 @@ from app.services.budgets import minutes_for_duration
 from app.services.channel_rules import ChannelRuleService
 from app.services.dispatch import dispatch_after_analysis
 from app.services.notifications import NotificationService
+from app.services.sharing import can_share, clone_request_for_child
 from app.workers.queue import enqueue_download
 from app.youtube.classifier import bucket_for_category
 from app.youtube.pipeline import YoutubeReviewPipeline, extract_video_id
@@ -123,6 +124,19 @@ async def create_youtube_request(
             await db.commit()
             await db.refresh(existing)
             enqueue_download(existing.id)
+            return YoutubeRequestRead.model_validate(existing)
+
+        # A sibling already asked for this video: give this kid their own
+        # request so it lands in their history and gets their Plex label. The
+        # screening verdict is inherited and the downloaded file is shared.
+        if existing.requested_by_child_id != payload.requested_by_child_id and can_share(existing):
+            await enforce_daily_request_limit(db, payload.requested_by_child_id)
+            shared = await clone_request_for_child(
+                db, existing, payload.requested_by_child_id, payload.requested_category
+            )
+            await dispatch_after_analysis(db, shared)
+            return YoutubeRequestRead.model_validate(shared)
+
         return YoutubeRequestRead.model_validate(existing)
 
     await enforce_daily_request_limit(db, payload.requested_by_child_id)
@@ -326,7 +340,8 @@ async def retry_youtube_download(
     item.denial_reason = None
     await db.commit()
     await db.refresh(item)
-    enqueue_download(item.id)
+    # force: an explicit re-download must refetch, not reuse a file on disk.
+    enqueue_download(item.id, force=True)
     return YoutubeRequestRead.model_validate(item)
 
 

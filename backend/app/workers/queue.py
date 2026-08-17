@@ -17,12 +17,13 @@ def retry_delays(settings=None) -> list[int]:
     return delays or [30]
 
 
-def enqueue_download(request_id: str) -> Job:
+def enqueue_download(request_id: str, force: bool = False) -> Job:
     """Enqueue a download with transient-failure retries on a progressive delay.
 
     The job re-raises transient errors (429/403/network) so RQ reschedules it;
     permanent failures (invalid URL, unavailable video) are marked failed
-    immediately by the job and never retried.
+    immediately by the job and never retried. `force` skips reusing a sibling's
+    existing file — used by the parent "Re-download" button.
     """
     from app.workers.jobs import run_download_job
 
@@ -31,5 +32,5 @@ def enqueue_download(request_id: str) -> Job:
     # Generous timeout: a long video download + the pre-download gap sleep
     # must not trip RQ's 180s default.
     return get_default_queue().enqueue(
-        run_download_job, request_id, retry=retry, job_timeout=1800
+        run_download_job, request_id, force=force, retry=retry, job_timeout=1800
     )
