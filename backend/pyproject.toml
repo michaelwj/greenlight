@@ -22,7 +22,7 @@ dependencies = [
   "rq>=1.16.2",
   "sqlalchemy>=2.0.36",
   "uvicorn[standard]>=0.34.0",
-  "yt-dlp[default,curl-cffi]>=2025.6.30",
+  "yt-dlp[default,curl-cffi]>=2026.8.19",
 ]
 
 [project.optional-dependencies]
